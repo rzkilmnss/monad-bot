@@ -1,111 +1,128 @@
 require("dotenv").config();
-const { ethers } = require("ethers");
 const readline = require("readline");
+const { ethers } = require("ethers");
 
 // Konfigurasi
 const RPC_URL = "https://testnet-rpc.monad.xyz/";
-const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(","); // Multiple wallets (pisahkan dengan koma)
-let CONTRACT_ADDRESS = "";
+const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(","); // Multi-wallet (pisahkan dengan koma)
+let CONTRACT_ADDRESS = ""; // Input dari menu awal
 
-// Buat interface CLI untuk input
+const ABI = [
+  {
+    "inputs": [],
+    "name": "mint",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "mintStatus",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
+
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+
+// Fungsi untuk input user
 const rl = readline.createInterface({
   input: process.stdin,
   output: process.stdout
 });
 
-// Fungsi untuk input contract address
-async function inputContractAddress() {
-  return new Promise((resolve) => {
-    rl.question("Masukkan contract address: ", (address) => {
-      CONTRACT_ADDRESS = address.trim();
-      resolve();
-    });
-  });
+// Fungsi cek gas fee
+async function getGasFee() {
+  const feeData = await provider.getFeeData();
+  return ethers.formatUnits(feeData.maxFeePerGas, "gwei");
 }
 
-// ABI fungsi mint
-const ABI = [
-  { "inputs": [], "name": "mint", "outputs": [], "stateMutability": "payable", "type": "function" }
-];
-
-// Fungsi untuk cek gas fee atau harga mint
-async function getMintPrice(contract) {
-  try {
-    const price = await contract.mintPrice(); // Pastikan kontrak punya fungsi ini
-    return price;
-  } catch (error) {
-    console.error("⚠️ Gagal mendapatkan harga mint, menggunakan default 0.1 MON");
-    return ethers.parseEther("0.1"); // Default jika gagal mendapatkan harga dari kontrak
-  }
-}
-
-// Fungsi untuk cek apakah mint sudah dibuka
+// Fungsi cek apakah minting sudah terbuka
 async function isMintOpen(contract) {
   try {
-    await contract.estimateGas.mint({ value: await getMintPrice(contract) });
+    await contract.estimateGas.mint({ value: ethers.parseEther("0.1") });
     return true;
-  } catch {
+  } catch (error) {
     return false;
   }
 }
 
-// Fungsi untuk mint NFT
-async function mintNFT(wallet) {
-  try {
-    const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
-    console.log(`🚀 Wallet ${wallet.address} mencoba mint...`);
-    
-    const price = await getMintPrice(contract);
-    const tx = await contract.mint({ value: price });
+// Fungsi untuk eksekusi mint dengan wallet tertentu
+async function mintNFT(walletIndex) {
+  const wallet = new ethers.Wallet(PRIVATE_KEYS[walletIndex], provider);
+  const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
 
-    console.log(`✅ Mint berhasil! Tx Hash: ${tx.hash}`);
+  try {
+    console.log(`🚀 Wallet ${walletIndex + 1}: Mengirim transaksi mint...`);
+    const tx = await contract.mint({ value: ethers.parseEther("0.1") });
+    console.log(`✅ Wallet ${walletIndex + 1} Mint berhasil! Tx Hash: ${tx.hash}`);
     await tx.wait();
     return true;
   } catch (error) {
-    console.error(`❌ Gagal mint dengan ${wallet.address}:`, error.reason || error);
+    console.error(`❌ Wallet ${walletIndex + 1} Gagal mint:`, error.reason || error);
     return false;
   }
 }
 
-// Fungsi utama untuk multi-wallet minting
-async function startBot() {
-  console.log("\n⏳ Menunggu public mint...");
-  let wallets = PRIVATE_KEYS.map((key) => new ethers.Wallet(key, new ethers.JsonRpcProvider(RPC_URL)));
-  let successWallets = [];
+// Fungsi utama bot
+async function startBot(mode) {
+  console.log("⏳ Memulai bot...");
 
-  while (successWallets.length < wallets.length) {
-    for (let wallet of wallets) {
-      if (successWallets.includes(wallet.address)) continue; // Lewati jika sudah sukses
-      
-      const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
-      console.log(`🔍 Mengecek status mint untuk ${wallet.address}...`);
+  for (let i = 0; i < PRIVATE_KEYS.length; i++) {
+    const wallet = new ethers.Wallet(PRIVATE_KEYS[i], provider);
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet);
 
-      if (await isMintOpen(contract)) {
-        console.log("✅ Mint dibuka! Eksekusi mint...");
-        if (await mintNFT(wallet)) {
-          successWallets.push(wallet.address); // Tandai wallet yang sukses
+    if (mode === "wait") {
+      console.log(`⏳ Wallet ${i + 1} Menunggu public mint...`);
+      while (true) {
+        console.clear();
+        const currentTime = new Date().toLocaleTimeString();
+        console.log("========================================");
+        console.log("        🔥 BOT AUTO MINT MONAD 🔥        ");
+        console.log("========================================");
+        console.log(`[${currentTime}] 🔍 Mengecek status mint...`);
+
+        if (await isMintOpen(contract)) {
+          console.log(`[${currentTime}] ✅ Minting dibuka! Menjalankan transaksi...`);
+          if (await mintNFT(i)) continue;
         }
-      } else {
-        console.log("❌ Mint belum dibuka, coba lagi nanti...");
-      }
-    }
 
-    if (successWallets.length < wallets.length) {
-      console.log("🔄 Menunggu 5 detik sebelum mencoba lagi...");
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+        console.log(`[${currentTime}] ❌ Minting belum dibuka, mencoba lagi dalam 5 detik...`);
+        console.log("========================================");
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+    } else {
+      console.log(`🚀 Wallet ${i + 1} Langsung minting...`);
+      await mintNFT(i);
     }
   }
-
-  console.log("🎉 Semua wallet berhasil mint! Bot berhenti.");
+  console.log("✅ Semua wallet selesai!");
 }
 
-// Jalankan program
-(async () => {
+// Menu awal
+function showMenu() {
   console.log("========================================");
   console.log("        🔥 BOT AUTO MINT MONAD 🔥        ");
   console.log("========================================");
 
-  await inputContractAddress();
-  await startBot();
-  rl.close();
-})();
+  rl.question("Masukkan contract address: ", (contractAddress) => {
+    CONTRACT_ADDRESS = contractAddress;
+
+    console.log("\nPilih mode:");
+    console.log("1. Instant Minting");
+    console.log("2. Menunggu Open Public");
+
+    rl.question("Masukkan pilihan (1/2): ", async (choice) => {
+      if (choice === "1") {
+        await startBot("instant");
+      } else {
+        await startBot("wait");
+      }
+      rl.close();
+    });
+  });
+}
+
+// Jalankan bot
+showMenu();
