@@ -1,133 +1,103 @@
-const ethers = require("ethers");
+const { ethers } = require("ethers");
 require("dotenv").config();
 const readline = require("readline");
 
 // Konfigurasi RPC Monad
-const RPC_URL = "https://testnet-rpc.monad.xyz";
+const RPC_URL = "https://rpc.testnet.monad.xyz"; // Ganti ke RPC mainnet jika perlu
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
-// Fungsi untuk membaca input dari terminal
+// Fungsi untuk input dari user
 const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
+  input: process.stdin,
+  output: process.stdout
 });
 
-// Fungsi untuk menanyakan input dari pengguna
-const askQuestion = (query) => {
-    return new Promise(resolve => rl.question(query, resolve));
-};
+// Fungsi untuk mengambil contract address dari link Magic Eden
+function extractContractAddress(url) {
+  const regex = /0x[a-fA-F0-9]{40}/;
+  const match = url.match(regex);
+  return match ? match[0] : null;
+}
 
-(async () => {
-    console.log("========================================");
-    console.log("🔥 BOT AUTO MINT MONAD 🔥");
-    console.log("========================================");
+// Fungsi untuk mengecek supply NFT
+async function getSupply(contractAddress) {
+  try {
+    const contract = new ethers.Contract(
+      contractAddress,
+      ["function totalSupply() view returns (uint256)"],
+      provider
+    );
+    return await contract.totalSupply();
+  } catch (error) {
+    console.log("⚠️ Gagal mengambil informasi supply.");
+    return null;
+  }
+}
 
-    // Input link Magic Eden
-    let inputLink = await askQuestion("Masukkan link Magic Eden: ");
-    let match = inputLink.match(/0x[a-fA-F0-9]{40}/);
+// Fungsi untuk mencoba instant mint
+async function instantMint(wallet, contractAddress) {
+  try {
+    const contract = new ethers.Contract(
+      contractAddress,
+      ["function mint() payable"],
+      wallet
+    );
 
-    if (!match) {
-        console.log("❌ Link tidak valid! Pastikan memasukkan link yang benar.");
-        process.exit(1);
+    const tx = await contract.mint({ value: ethers.parseEther("0.1") });
+    console.log(`✅ Mint berhasil! TX: ${tx.hash}`);
+  } catch (error) {
+    console.log(`❌ Gagal minting: ${error.reason || error.message}`);
+  }
+}
+
+// Fungsi utama bot
+async function startBot() {
+  rl.question("Masukkan link Magic Eden: ", async (url) => {
+    const contractAddress = extractContractAddress(url);
+    if (!contractAddress) {
+      console.log("❌ Link tidak valid!");
+      rl.close();
+      return;
     }
-
-    const contractAddress = match[0];
+    
     console.log(`✅ Contract Address: ${contractAddress}`);
 
-    // Pilih mode operasi
-    console.log("\nPilih mode:");
-    console.log("1. Instant Minting");
-    console.log("2. Menunggu Open Public");
-    let mode = await askQuestion("Masukkan pilihan (1/2): ");
-
-    if (mode !== "1" && mode !== "2") {
-        console.log("❌ Pilihan tidak valid!");
-        process.exit(1);
+    // Cek supply sebelum minting
+    const supply = await getSupply(contractAddress);
+    if (supply === null || supply == 0) {
+      console.log("❌ Supply habis! Minting dihentikan.");
+      rl.close();
+      return;
     }
 
-    // Ambil private keys dari environment variable
-    const PRIVATE_KEYS = process.env.PRIVATE_KEYS?.split(",") || [];
-    if (PRIVATE_KEYS.length === 0) {
-        console.log("❌ Tidak ada private keys! Tambahkan ke file .env");
-        process.exit(1);
-    }
+    rl.question("\nPilih mode:\n1. Instant Minting\n2. Menunggu Open Public\nMasukkan pilihan (1/2): ", async (choice) => {
+      if (choice !== "1" && choice !== "2") {
+        console.log("❌ Pilihan tidak valid.");
+        rl.close();
+        return;
+      }
 
-    // Buat instance wallet
-    const wallets = PRIVATE_KEYS.map(key => new ethers.Wallet(key, provider));
+      const privateKeys = process.env.PRIVATE_KEYS ? process.env.PRIVATE_KEYS.split(",") : [];
+      if (privateKeys.length === 0) {
+        console.log("❌ Tidak ada private key yang diatur di .env!");
+        rl.close();
+        return;
+      }
 
-    // Fungsi cek status mint
-    async function isMintOpen(contract) {
-        try {
-            let open = await contract.mintStatus();
-            return open; // True jika minting sudah terbuka
-        } catch (error) {
-            return false;
+      const wallets = privateKeys.map(pk => new ethers.Wallet(pk, provider));
+
+      if (choice === "1") {
+        for (const wallet of wallets) {
+          await instantMint(wallet, contractAddress);
         }
-    }
+      } else {
+        console.log("⏳ Mode menunggu open public belum diimplementasikan.");
+      }
 
-    // Fungsi cek supply NFT sebelum minting
-    async function getSupply(contract) {
-        try {
-            let totalSupply = await contract.totalSupply();
-            let maxSupply = await contract.maxSupply();
-            return maxSupply - totalSupply; // Sisa supply yang tersedia
-        } catch (error) {
-            console.log("⚠️ Gagal mengambil informasi supply.");
-            return 0;
-        }
-    }
+      rl.close();
+    });
+  });
+}
 
-    // Fungsi utama untuk menjalankan minting
-    async function startBot() {
-        const abi = [
-            "function mint() public payable",
-            "function mintStatus() public view returns (bool)",
-            "function totalSupply() public view returns (uint256)",
-            "function maxSupply() public view returns (uint256)"
-        ];
-        const contract = new ethers.Contract(contractAddress, abi, provider);
-
-        let remainingWallets = [...wallets];
-
-        while (remainingWallets.length > 0) {
-            let wallet = remainingWallets.shift(); // Ambil wallet pertama dari daftar
-            let signer = wallet.connect(provider);
-            let contractWithSigner = contract.connect(signer);
-
-            // Cek apakah mode menunggu open public
-            if (mode === "2") {
-                console.log(`⏳ Menunggu minting terbuka untuk wallet ${wallet.address}...`);
-                while (!(await isMintOpen(contract))) {
-                    await new Promise(resolve => setTimeout(resolve, 5000)); // Cek setiap 5 detik
-                }
-                console.log("✅ Minting telah dibuka!");
-            }
-
-            // Cek sisa supply sebelum minting
-            let supplyLeft = await getSupply(contract);
-            if (supplyLeft <= 0) {
-                console.log("❌ Supply habis! Minting dihentikan.");
-                process.exit(1);
-            }
-
-            // Proses minting
-            try {
-                console.log(`🚀 Minting dengan wallet: ${wallet.address}`);
-                let tx = await contractWithSigner.mint({
-                    value: ethers.parseEther("0.1") // Sesuaikan harga mint di sini
-                });
-
-                await tx.wait();
-                console.log(`✅ Mint sukses! Wallet: ${wallet.address}`);
-            } catch (error) {
-                console.log(`❌ Mint gagal di wallet ${wallet.address}. Coba lagi...`);
-                remainingWallets.push(wallet); // Coba lagi nanti
-            }
-        }
-
-        console.log("🎉 Semua wallet berhasil mint! Bot berhenti.");
-        process.exit(0);
-    }
-
-    await startBot();
-})();
+// Jalankan bot
+startBot();
