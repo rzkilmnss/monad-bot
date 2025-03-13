@@ -14,9 +14,6 @@ const CONTRACT_ABI = [
     "function mintPublic(address recipient, uint256 tokenId, uint256 amount, bytes calldata data) payable"
 ];
 
-const fs = require('fs');
-const { ethers } = require('ethers');  // Pastikan ethers diimpor
-
 // Baca ABI dari file
 const abiData = JSON.parse(fs.readFileSync('abi.json', 'utf-8'));
 
