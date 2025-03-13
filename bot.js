@@ -3,7 +3,7 @@ const { ethers } = require("ethers");
 const readlineSync = require("readline-sync");
 
 // Konfigurasi RPC
-const RPC_URL = "https://testnet-rpc.monad.xyz"; // Pastikan RPC benar
+const RPC_URL = "https://testnet-rpc.monad.xyz"; // Ganti dengan RPC yang benar
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 // Ambil Private Keys dari .env
@@ -15,50 +15,12 @@ async function getBalance(wallet) {
     return ethers.formatEther(balance);
 }
 
-// Fungsi untuk mengecek apakah smart contract punya fungsi tertentu
-async function hasFunction(contract, functionName) {
-    try {
-        await contract[functionName].staticCall();
-        return true;
-    } catch (error) {
-        return false;
-    }
-}
-
-// Fungsi untuk mendapatkan harga mint otomatis
-async function getMintPrice(contract) {
-    if (await hasFunction(contract, "mintPrice")) {
-        try {
-            const price = await contract.mintPrice();
-            return ethers.formatEther(price);
-        } catch (error) {
-            console.log("⚠️ Gagal mengambil harga mint. Gunakan nilai default 0.1 MON");
-        }
-    } else {
-        console.log("⚠️ Smart contract tidak memiliki fungsi mintPrice(). Gunakan nilai default 0.1 MON");
-    }
-    return "0.1"; // Default jika gagal
-}
-
-// Fungsi untuk mengecek apakah minting sudah bisa dilakukan
-async function canMint(contract) {
-    if (await hasFunction(contract, "publicMintActive")) {
-        try {
-            return await contract.publicMintActive();
-        } catch (error) {
-            console.log("⚠️ Gagal mengecek status minting.");
-        }
-    }
-    return true; // Jika tidak ada fungsi status, anggap bisa mint
-}
-
 // Fungsi minting NFT
-async function mintNFT(wallet, contract) {
+async function mintNFT(wallet, contract, mintPrice) {
     try {
-        const price = await getMintPrice(contract);
-        console.log(`🔥 Minting NFT dengan wallet ${wallet.address} dengan harga ${price} MON...`);
+        console.log(`🔥 Minting NFT dengan wallet ${wallet.address} dengan harga ${mintPrice} MON...`);
 
-        const tx = await contract.mint({ value: ethers.parseEther(price) });
+        const tx = await contract.mint({ value: ethers.parseEther(mintPrice) });
         await tx.wait();
         console.log(`✅ Mint sukses! TX: ${tx.hash}`);
         return true;
@@ -72,6 +34,7 @@ async function mintNFT(wallet, contract) {
 async function startBot() {
     console.log("========================================");
     console.log("        🔥 BOT AUTO MINT MONAD 🔥       ");
+    console.log("             Created by OLDSHOOLVG      ");
     console.log("========================================");
 
     // Input Magic Eden link
@@ -84,16 +47,26 @@ async function startBot() {
     const contractAddress = match[0];
     console.log(`✅ Contract Address: ${contractAddress}`);
 
+    // Input harga mint manual
+    let mintPrice = readlineSync.question("Masukkan harga mint (MON) [default 0.1]: ").trim();
+    if (!mintPrice) mintPrice = "0.1"; // Jika kosong, pakai default 0.1 MON
+
     // Pilih mode mint
     console.log("\nPilih mode:");
     console.log("1. Instant Minting");
     console.log("2. Menunggu Open Public");
-    const mode = readlineSync.question("Masukkan pilihan (1/2): ").trim();
+    console.log("3. Keluar");
+    const mode = readlineSync.question("Masukkan pilihan (1/2/3): ").trim();
+
+    if (mode === "3") {
+        console.log("👋 Keluar dari bot. Sampai jumpa!");
+        return;
+    }
 
     // Inisialisasi contract
     const contract = new ethers.Contract(
         contractAddress,
-        ["function mintPrice() view returns (uint256)", "function mint() payable", "function publicMintActive() view returns (bool)"],
+        ["function mint() payable"],
         provider
     );
 
@@ -111,19 +84,15 @@ async function startBot() {
         const contractWithSigner = contract.connect(wallet);
 
         if (mode === "1") {
-            if (await canMint(contract)) {
-                await mintNFT(wallet, contractWithSigner);
-            } else {
-                console.log("⚠️ Minting belum dibuka!");
-            }
+            await mintNFT(wallet, contractWithSigner, mintPrice);
         } else {
             console.log("🚀 Menunggu Open Public...");
             while (true) {
-                if (await canMint(contract)) {
-                    await mintNFT(wallet, contractWithSigner);
+                const canMint = await contract.estimateGas.mint({ value: ethers.parseEther(mintPrice) }).catch(() => false);
+                if (canMint) {
+                    await mintNFT(wallet, contractWithSigner, mintPrice);
                     break;
                 }
-                console.log("⏳ Masih menunggu minting dibuka...");
                 await new Promise((r) => setTimeout(r, 5000));
             }
         }
