@@ -3,55 +3,55 @@ const fs = require("fs");
 const { ethers } = require("ethers");
 const readlineSync = require("readline-sync");
 
-// 🔗 Gunakan hanya satu RPC
+// 🔗 RPC Monad (Hanya 1)
 const RPC_URL = "https://testnet-rpc.monad.xyz";
+
+// 🔥 Provider
 const provider = new ethers.JsonRpcProvider(RPC_URL);
-console.log(`✅ Menggunakan RPC: ${RPC_URL}`);
 
 // 🔑 Load Private Keys
 const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
 
 // 📜 Load ABI
 const abiData = JSON.parse(fs.readFileSync("abi.json", "utf-8"));
-
-// 🏷️ Ambil function signature dan parameter dari ABI
 const mintFunction = abiData[0].name;
-const params = abiData[0].inputs.map(input => input.type);
 
 console.log("🔍 Menggunakan fungsi mint:", mintFunction);
-console.log("📜 Parameter:", params.join(", "));
 
-// 💰 Cek Saldo Wallet
-async function getBalance(wallet) {
+// 🔄 Fungsi cek supply NFT
+async function getSupply(contract) {
     try {
-        const balance = await provider.getBalance(wallet);
-        return ethers.formatEther(balance);
+        const totalSupply = await contract.totalSupply();
+        const maxSupply = await contract.maxSupply();
+        console.log(`📊 Supply: ${totalSupply}/${maxSupply}`);
+        return { totalSupply, maxSupply };
     } catch (error) {
-        console.log(`❌ Gagal cek saldo ${wallet}: ${error.message}`);
-        return "0";
+        console.log("❌ Gagal mengambil data supply:", error.reason || error.message);
+        return null;
     }
 }
 
-// 🔥 Mint NFT
-async function mintNFT(wallet, contract, mintPrice) {
-    while (true) { // Auto-retry tanpa henti
-        try {
-            console.log(`🔥 Minting NFT dengan wallet ${wallet.address} seharga ${mintPrice} MON...`);
+// 💰 Cek Saldo Wallet
+async function getBalance(wallet) {
+    return ethers.formatEther(await provider.getBalance(wallet));
+}
 
-            const tx = await contract[mintFunction](
-                wallet.address, 0, 1, "0x", // recipient, tokenId, amount, data
-                { 
-                    value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0, 
-                    gasPrice: ethers.parseUnits("5", "gwei") // Naikkan gas price agar lebih cepat
-                }
-            );
+// 🚀 Fungsi minting
+async function mintNFT(wallet, contract, mintPrice, gasPrice) {
+    try {
+        console.log(`🔥 Minting NFT dengan wallet ${wallet.address}...`);
 
-            await tx.wait();
-            console.log(`✅ Mint sukses! TX: ${tx.hash}`);
-            return;
-        } catch (error) {
-            console.log(`❌ Gagal minting: ${error.reason || error.message}, retrying...`);
-        }
+        const tx = await contract[mintFunction](
+            wallet.address, 0, 1, "0x", // recipient, tokenId, amount, data
+            { value: ethers.parseEther(mintPrice.toString()), gasPrice: gasPrice }
+        );
+
+        await tx.wait();
+        console.log(`✅ Mint sukses! TX: ${tx.hash}`);
+        return true;
+    } catch (error) {
+        console.log(`❌ Gagal minting: ${error.reason || error.message}`);
+        return false;
     }
 }
 
@@ -76,22 +76,10 @@ async function startBot() {
     if (!mintPrice) mintPrice = "0.1"; // Default 0.1 MON
     mintPrice = parseFloat(mintPrice);
 
-    // 🎛️ Pilih mode mint
-    console.log("\nPilih mode:");
-    console.log("1. Instant Minting");
-    console.log("2. Menunggu Open Public");
-    console.log("3. Keluar");
-    const mode = readlineSync.question("Masukkan pilihan (1/2/3): ").trim();
-
-    if (mode === "3") {
-        console.log("👋 Keluar dari bot. Sampai jumpa!");
-        return;
-    }
-
     // 🔄 Inisialisasi kontrak
     const contract = new ethers.Contract(contractAddress, abiData, provider);
 
-    // 💰 Tampilkan saldo wallet
+    // 💰 Tampilkan saldo semua wallet
     console.log("\n💰 Saldo Wallet:");
     for (let privateKey of PRIVATE_KEYS) {
         const wallet = new ethers.Wallet(privateKey, provider);
@@ -101,37 +89,29 @@ async function startBot() {
 
     console.log("\n⏳ Memulai bot...");
 
-    if (mode === "1") {
-        // 🚀 Mode Instant Mint - Semua wallet eksekusi **serentak tanpa delay**
-        await Promise.all(PRIVATE_KEYS.map(async (privateKey) => {
+    // 🚀 Mulai looping semua wallet
+    let gasPrice = ethers.parseUnits("5", "gwei"); // Gas awal 5 Gwei
+
+    while (true) {
+        // 🔄 Cek supply NFT
+        const supplyData = await getSupply(contract);
+        if (!supplyData || supplyData.totalSupply >= supplyData.maxSupply) {
+            console.log("❌ NFT SOLD OUT! BOT BERHENTI.");
+            break;
+        }
+
+        // 🚀 Mint dengan semua wallet
+        for (let privateKey of PRIVATE_KEYS) {
             const wallet = new ethers.Wallet(privateKey, provider);
             const contractWithSigner = contract.connect(wallet);
-            await mintNFT(wallet, contractWithSigner, mintPrice);
-        }));
-    } else {
-        // 🕒 Mode Menunggu Open Public
-        console.log("🚀 Menunggu Open Public...");
 
-        await Promise.all(PRIVATE_KEYS.map(async (privateKey) => {
-            const wallet = new ethers.Wallet(privateKey, provider);
-            const contractWithSigner = contract.connect(wallet);
-
-            while (true) {
-                try {
-                    // Coba estimasi gas sebagai indikator apakah mint sudah dibuka
-                    const canMint = await contract.estimateGas[mintFunction](
-                        wallet.address, 0, 1, "0x", 
-                        { value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0 }
-                    );
-                    if (canMint) {
-                        await mintNFT(wallet, contractWithSigner, mintPrice);
-                        break;
-                    }
-                } catch (err) {
-                    console.log(`⏳ Wallet ${wallet.address} masih menunggu open public mint...`);
-                }
+            const success = await mintNFT(wallet, contractWithSigner, mintPrice, gasPrice);
+            if (!success) {
+                // Jika gagal, naikkan gas price untuk transaksi berikutnya
+                gasPrice = gasPrice * 2n; // Naikkan gas price 2x
+                console.log(`⚡ Menaikkan gas price: ${ethers.formatUnits(gasPrice, "gwei")} Gwei`);
             }
-        }));
+        }
     }
 }
 
