@@ -1,0 +1,6 @@
+[
+    {
+        "mintFunction": "0x7bca93c2",
+        "params": ["address", "uint256", "uint256[]"]
+    }
+]
