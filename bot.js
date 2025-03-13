@@ -27,16 +27,23 @@ async function getContractABI(contractAddress) {
 }
 
 // Fungsi untuk mendeteksi fungsi mint yang benar
-async function detectMintFunction(contract) {
-    try {
-        const abi = contract.interface.fragments;
-        for (const func of abi) {
-            if (func.type === "function" && func.name.toLowerCase().includes("mint")) {
-                return func.name; // Mengembalikan nama fungsi mint yang ditemukan
+async function detectMintFunction(contract, wallet, mintPrice) {
+    console.log("🔍 Mencoba mendeteksi fungsi mint...");
+    const abi = contract.interface.fragments;
+
+    for (const func of abi) {
+        if (func.type === "function") {
+            const functionName = func.name;
+            try {
+                console.log(`⚡ Mencoba fungsi: ${functionName}...`);
+                const tx = await contract.connect(wallet)[functionName]({ value: ethers.parseEther(mintPrice) });
+                await tx.wait();
+                console.log(`✅ Fungsi mint ditemukan: ${functionName}`);
+                return functionName;
+            } catch (error) {
+                console.log(`❌ ${functionName} gagal: ${error.reason || error.message}`);
             }
         }
-    } catch (error) {
-        console.log("❌ Gagal mendeteksi fungsi mint:", error.message);
     }
     return null;
 }
@@ -80,14 +87,16 @@ async function startBot() {
     let abi = await getContractABI(contractAddress);
     if (!abi) {
         console.log("⚠️ ABI tidak tersedia, mencoba metode brute-force...");
-        abi = ["function mint() payable", "function mint(uint256 amount) payable"];
+        abi = ["function mint()", "function mint(uint256 amount)"];
     }
 
     // Inisialisasi contract
     const contract = new ethers.Contract(contractAddress, abi, provider);
 
-    // Deteksi fungsi mint
-    let mintFunction = await detectMintFunction(contract);
+    // Gunakan wallet pertama untuk mendeteksi fungsi mint
+    const firstWallet = new ethers.Wallet(PRIVATE_KEYS[0], provider);
+    let mintFunction = await detectMintFunction(contract, firstWallet, mintPrice);
+
     if (!mintFunction) {
         console.log("❌ Tidak dapat mendeteksi fungsi mint! Harap cek ABI secara manual.");
         return;
