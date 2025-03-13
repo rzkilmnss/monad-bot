@@ -12,37 +12,32 @@ const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
 
 // Baca ABI dari file
 const abiData = JSON.parse(fs.readFileSync("abi.json", "utf-8"));
-const mintFunction = abiData[0].mintFunction;
-const params = abiData[0].params;
 
-// Fungsi untuk menampilkan saldo wallet
+// Ambil function signature dan parameter dari ABI
+const mintFunction = abiData[0].name;
+const params = abiData[0].inputs.map(input => input.type);
+
+console.log("🔍 Menggunakan fungsi mint:", mintFunction);
+console.log("📜 Parameter:", params.join(", "));
+
+// Fungsi untuk mengecek saldo wallet
 async function getBalance(wallet) {
     const balance = await provider.getBalance(wallet);
     return ethers.formatEther(balance);
 }
 
-// Fungsi minting NFT
+// Fungsi untuk melakukan mint NFT
 async function mintNFT(wallet, contract, mintPrice, tokenId = 0, amount = 1) {
     try {
         console.log(`🔥 Minting NFT dengan wallet ${wallet.address} seharga ${mintPrice} MON...`);
 
-        let tx;
-        if (mintPrice > 0) {
-            tx = await contract.mintPublic(
-                wallet.address,  // recipient
-                tokenId,         // tokenId (default: 0)
-                amount,          // amount (default: 1)
-                "0x",            // data (kosong)
-                { value: ethers.parseEther(mintPrice.toString()) } // Kirim MON jika tidak free mint
-            );
-        } else {
-            tx = await contract.mintPublic(
-                wallet.address,
-                tokenId,
-                amount,
-                "0x"
-            ); // Tanpa `value` jika free mint
-        }
+        const tx = await contract[mintFunction](
+            wallet.address,  // recipient
+            tokenId,         // tokenId (default: 0)
+            amount,          // amount (default: 1)
+            "0x",            // data (kosong)
+            { value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0 } // Jika harga 0, tidak perlu nilai MON
+        );
 
         await tx.wait();
         console.log(`✅ Mint sukses! TX: ${tx.hash}`);
@@ -72,7 +67,7 @@ async function startBot() {
     // Input harga mint
     let mintPrice = readlineSync.question("Masukkan harga mint (MON) [default 0.1]: ").trim();
     if (!mintPrice) mintPrice = "0.1"; // Default 0.1 MON
-    mintPrice = parseFloat(mintPrice); // Konversi ke number
+    mintPrice = parseFloat(mintPrice);
 
     // Pilih mode mint
     console.log("\nPilih mode:");
@@ -86,7 +81,7 @@ async function startBot() {
         return;
     }
 
-    // Inisialisasi contract
+    // Inisialisasi kontrak
     const contract = new ethers.Contract(contractAddress, abiData, provider);
 
     // Tampilkan saldo wallet
@@ -103,29 +98,23 @@ async function startBot() {
         const contractWithSigner = contract.connect(wallet);
 
         if (mode === "1") {
+            // Mode Instant Mint
             await mintNFT(wallet, contractWithSigner, mintPrice);
         } else {
+            // Mode Menunggu Open Public
             console.log("🚀 Menunggu Open Public...");
             while (true) {
                 try {
-                    // Cek apakah minting bisa dilakukan
-                    const canMint = await contract.estimateGas.mintPublic(
-                        wallet.address,
-                        0,
-                        1,
-                        "0x",
-                        mintPrice > 0 ? { value: ethers.parseEther(mintPrice.toString()) } : {}
-                    );
-                    
+                    // Coba estimasi gas sebagai indikator apakah mint sudah dibuka
+                    const canMint = await contract.estimateGas[mintFunction](wallet.address, 0, 1, "0x", { value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0 });
                     if (canMint) {
                         await mintNFT(wallet, contractWithSigner, mintPrice);
                         break;
                     }
-                } catch (error) {
+                } catch (err) {
                     console.log("⏳ Masih menunggu open public mint...");
                 }
-
-                await new Promise((r) => setTimeout(r, 5000));
+                await new Promise(r => setTimeout(r, 5000)); // Tunggu 5 detik sebelum cek ulang
             }
         }
     }
