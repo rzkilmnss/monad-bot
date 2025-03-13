@@ -14,6 +14,55 @@ const CONTRACT_ABI = [
     "function mintPublic(address recipient, uint256 tokenId, uint256 amount, bytes calldata data) payable"
 ];
 
+const fs = require('fs');
+const { ethers } = require('ethers');  // Pastikan ethers diimpor
+
+// Baca ABI dari file
+const abiData = JSON.parse(fs.readFileSync('abi.json', 'utf-8'));
+
+// Ambil function signature dan parameter dari ABI
+const mintFunction = abiData[0].mintFunction;
+const params = abiData[0].params;
+
+console.log("🔍 Menggunakan fungsi mint:", mintFunction);
+console.log("📜 Parameter:", params);
+
+async function mintNFT(wallet, contract, mintPrice) {
+    try {
+        const contractInterface = new ethers.utils.Interface([
+            `function ${mintFunction}(${params.join(',')})`
+        ]);
+
+        const encodedData = contractInterface.encodeFunctionData(mintFunction, [
+            wallet.address, 1, []
+        ]);
+
+        const tx = await wallet.sendTransaction({
+            to: contract.address,
+            data: encodedData,
+            value: ethers.utils.parseEther(mintPrice.toString()),
+            gasLimit: 100000
+        });
+
+        console.log("✅ Minting sukses! Tx Hash:", tx.hash);
+        await tx.wait();  // Tunggu transaksi selesai
+    } catch (error) {
+        console.error("❌ Gagal minting:", error);
+    }
+}
+
+// Contoh pemanggilan (pastikan ada provider & signer)
+async function main() {
+    const provider = new ethers.providers.JsonRpcProvider("https://rpc.testnet.monad.xyz");
+    const wallet = new ethers.Wallet("PRIVATE_KEY", provider);
+    const contract = new ethers.Contract("CONTRACT_ADDRESS", abiData, wallet);
+
+    const mintPrice = 0.1;  // Sesuaikan harga
+    await mintNFT(wallet, contract, mintPrice);
+}
+
+main();
+
 // Fungsi untuk menampilkan saldo wallet
 async function getBalance(wallet) {
     const balance = await provider.getBalance(wallet);
