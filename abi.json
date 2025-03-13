@@ -1,6 +1,14 @@
 [
     {
-        "mintFunction": "mintPublic",
-        "params": ["address", "uint256", "uint256", "bytes"]
+        "type": "function",
+        "name": "mintPublic",
+        "inputs": [
+            { "name": "recipient", "type": "address" },
+            { "name": "tokenId", "type": "uint256" },
+            { "name": "amount", "type": "uint256" },
+            { "name": "data", "type": "bytes" }
+        ],
+        "outputs": [],
+        "stateMutability": "payable"
     }
 ]
