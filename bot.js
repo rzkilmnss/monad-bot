@@ -3,24 +3,36 @@ const { ethers } = require("ethers");
 const readlineSync = require("readline-sync");
 
 // Konfigurasi RPC
-const RPC_URL = "https://testnet-rpc.monad.xyz"; // Ganti dengan RPC yang benar
+const RPC_URL = "https://testnet-rpc.monad.xyz"; // Gunakan RPC testnet Monad
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 // Ambil Private Keys dari .env
 const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
 
-// Fungsi untuk menampilkan saldo
+// ABI yang sesuai dengan transaksi mint
+const CONTRACT_ABI = [
+    "function mintPublic(address recipient, uint256 tokenId, uint256 amount, bytes calldata data) payable"
+];
+
+// Fungsi untuk menampilkan saldo wallet
 async function getBalance(wallet) {
     const balance = await provider.getBalance(wallet);
     return ethers.formatEther(balance);
 }
 
 // Fungsi minting NFT
-async function mintNFT(wallet, contract, mintPrice) {
+async function mintNFT(wallet, contract, mintPrice, tokenId = 0, amount = 1) {
     try {
-        console.log(`🔥 Minting NFT dengan wallet ${wallet.address} dengan harga ${mintPrice} MON...`);
+        console.log(`🔥 Minting NFT dengan wallet ${wallet.address} seharga ${mintPrice} MON...`);
 
-        const tx = await contract.mint({ value: ethers.parseEther(mintPrice) });
+        const tx = await contract.mintPublic(
+            wallet.address,  // recipient
+            tokenId,         // tokenId (default: 0)
+            amount,          // amount (default: 1)
+            "0x",            // data (kosong)
+            { value: ethers.parseEther(mintPrice) }
+        );
+
         await tx.wait();
         console.log(`✅ Mint sukses! TX: ${tx.hash}`);
         return true;
@@ -30,7 +42,7 @@ async function mintNFT(wallet, contract, mintPrice) {
     }
 }
 
-// Fungsi utama
+// Fungsi utama bot
 async function startBot() {
     console.log("========================================");
     console.log("        🔥 BOT AUTO MINT MONAD 🔥       ");
@@ -47,9 +59,9 @@ async function startBot() {
     const contractAddress = match[0];
     console.log(`✅ Contract Address: ${contractAddress}`);
 
-    // Input harga mint manual
+    // Input harga mint
     let mintPrice = readlineSync.question("Masukkan harga mint (MON) [default 0.1]: ").trim();
-    if (!mintPrice) mintPrice = "0.1"; // Jika kosong, pakai default 0.1 MON
+    if (!mintPrice) mintPrice = "0.1"; // Default 0.1 MON
 
     // Pilih mode mint
     console.log("\nPilih mode:");
@@ -64,13 +76,9 @@ async function startBot() {
     }
 
     // Inisialisasi contract
-    const contract = new ethers.Contract(
-        contractAddress,
-        ["function mint() payable"],
-        provider
-    );
+    const contract = new ethers.Contract(contractAddress, CONTRACT_ABI, provider);
 
-    // Menampilkan saldo setiap wallet
+    // Tampilkan saldo wallet
     console.log("\n💰 Saldo Wallet:");
     for (let privateKey of PRIVATE_KEYS) {
         const wallet = new ethers.Wallet(privateKey, provider);
@@ -88,7 +96,7 @@ async function startBot() {
         } else {
             console.log("🚀 Menunggu Open Public...");
             while (true) {
-                const canMint = await contract.estimateGas.mint({ value: ethers.parseEther(mintPrice) }).catch(() => false);
+                const canMint = await contract.estimateGas.mintPublic(wallet.address, 0, 1, "0x", { value: ethers.parseEther(mintPrice) }).catch(() => false);
                 if (canMint) {
                     await mintNFT(wallet, contractWithSigner, mintPrice);
                     break;
