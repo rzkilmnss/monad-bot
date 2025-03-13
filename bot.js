@@ -6,7 +6,7 @@ const readlineSync = require("readline-sync");
 // 🔗 List RPC
 const RPC_URLS = [
     "https://testnet-rpc.monad.xyz",
-    "https://backup-rpc.monad.xyz" // Tambahkan jika ada RPC alternatif
+    "https://backup-rpc.monad.xyz"
 ];
 
 // 🔥 Auto pilih RPC tercepat
@@ -31,11 +31,20 @@ async function getFastestRPC() {
     return new ethers.JsonRpcProvider(fastestRPC);
 }
 
+// 🔄 Inisialisasi provider sebelum bot berjalan
 let provider;
-(async () => { provider = await getFastestRPC(); })();
+async function initializeProvider() {
+    provider = await getFastestRPC();
+    console.log(`🔗 Provider siap: ${provider.connection.url}`);
+}
 
 // 🔑 Load Private Keys
-const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
+const PRIVATE_KEYS = process.env.PRIVATE_KEYS ? process.env.PRIVATE_KEYS.split(",") : [];
+
+if (PRIVATE_KEYS.length === 0) {
+    console.log("❌ PRIVATE_KEYS di .env kosong! Harap isi private key terlebih dahulu.");
+    process.exit(1);
+}
 
 // 📜 Load ABI
 const abiData = JSON.parse(fs.readFileSync("abi.json", "utf-8"));
@@ -63,7 +72,7 @@ async function mintNFT(wallet, contract, mintPrice) {
                 wallet.address, 0, 1, "0x", // recipient, tokenId, amount, data
                 { 
                     value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0, 
-                    gasPrice: ethers.parseUnits("5", "gwei") // Naikkan gas price agar lebih cepat
+                    gasPrice: ethers.parseUnits("10", "gwei") // Tingkatkan gas price agar lebih cepat
                 }
             );
 
@@ -78,6 +87,8 @@ async function mintNFT(wallet, contract, mintPrice) {
 
 // 🚀 Start Bot
 async function startBot() {
+    await initializeProvider(); // Pastikan provider sudah siap sebelum lanjut
+
     console.log("========================================");
     console.log("        🔥 BOT AUTO MINT MONAD 🔥       ");
     console.log("========================================");
