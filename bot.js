@@ -1,68 +1,33 @@
 require("dotenv").config();
+const fs = require("fs");
 const { ethers } = require("ethers");
 const readlineSync = require("readline-sync");
 
 // Konfigurasi RPC
-const RPC_URL = "https://testnet-rpc.monad.xyz"; // Gunakan RPC testnet Monad
+const RPC_URL = "https://testnet-rpc.monad.xyz";
 const provider = new ethers.JsonRpcProvider(RPC_URL);
 
 // Ambil Private Keys dari .env
-const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
+const PRIVATE_KEYS = process.env.PRIVATE_KEYS ? process.env.PRIVATE_KEYS.split(",") : [];
 
-// ABI yang sesuai dengan transaksi mint
-const CONTRACT_ABI = [
-    "function mintPublic(address recipient, uint256 tokenId, uint256 amount, bytes calldata data) payable"
-];
+// Pastikan ada Private Key
+if (PRIVATE_KEYS.length === 0) {
+    console.error("❌ PRIVATE_KEYS tidak ditemukan! Pastikan sudah diatur di .env");
+    process.exit(1);
+}
 
 // Baca ABI dari file
-const abiData = JSON.parse(fs.readFileSync('abi.json', 'utf-8'));
+const abiData = JSON.parse(fs.readFileSync("abi.json", "utf-8"));
+const CONTRACT_ABI = [
+    `function ${abiData[0].mintFunction}(${abiData[0].params.join(",")}) payable`
+];
 
-// Ambil function signature dan parameter dari ABI
-const mintFunction = abiData[0].mintFunction;
-const params = abiData[0].params;
-
-console.log("🔍 Menggunakan fungsi mint:", mintFunction);
-console.log("📜 Parameter:", params);
-
-async function mintNFT(wallet, contract, mintPrice) {
-    try {
-        const contractInterface = new ethers.utils.Interface([
-            `function ${mintFunction}(${params.join(',')})`
-        ]);
-
-        const encodedData = contractInterface.encodeFunctionData(mintFunction, [
-            wallet.address, 1, []
-        ]);
-
-        const tx = await wallet.sendTransaction({
-            to: contract.address,
-            data: encodedData,
-            value: ethers.utils.parseEther(mintPrice.toString()),
-            gasLimit: 100000
-        });
-
-        console.log("✅ Minting sukses! Tx Hash:", tx.hash);
-        await tx.wait();  // Tunggu transaksi selesai
-    } catch (error) {
-        console.error("❌ Gagal minting:", error);
-    }
-}
-
-// Contoh pemanggilan (pastikan ada provider & signer)
-async function main() {
-    const provider = new ethers.providers.JsonRpcProvider("https://rpc.testnet.monad.xyz");
-    const wallet = new ethers.Wallet("PRIVATE_KEY", provider);
-    const contract = new ethers.Contract("CONTRACT_ADDRESS", abiData, wallet);
-
-    const mintPrice = 0.1;  // Sesuaikan harga
-    await mintNFT(wallet, contract, mintPrice);
-}
-
-main();
+console.log("🔍 Menggunakan fungsi mint:", abiData[0].mintFunction);
+console.log("📜 Parameter:", abiData[0].params);
 
 // Fungsi untuk menampilkan saldo wallet
-async function getBalance(wallet) {
-    const balance = await provider.getBalance(wallet);
+async function getBalance(walletAddress) {
+    const balance = await provider.getBalance(walletAddress);
     return ethers.formatEther(balance);
 }
 
@@ -72,11 +37,11 @@ async function mintNFT(wallet, contract, mintPrice, tokenId = 0, amount = 1) {
         console.log(`🔥 Minting NFT dengan wallet ${wallet.address} seharga ${mintPrice} MON...`);
 
         const tx = await contract.mintPublic(
-            wallet.address,  // recipient
-            tokenId,         // tokenId (default: 0)
-            amount,          // amount (default: 1)
-            "0x",            // data (kosong)
-            { value: ethers.parseEther(mintPrice) }
+            wallet.address,
+            tokenId,
+            amount,
+            "0x",
+            { value: ethers.parseEther(mintPrice.toString()) }
         );
 
         await tx.wait();
@@ -92,7 +57,6 @@ async function mintNFT(wallet, contract, mintPrice, tokenId = 0, amount = 1) {
 async function startBot() {
     console.log("========================================");
     console.log("        🔥 BOT AUTO MINT MONAD 🔥       ");
-    console.log("             Created by OLDSHOOLVG      ");
     console.log("========================================");
 
     // Input Magic Eden link
