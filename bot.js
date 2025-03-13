@@ -3,48 +3,13 @@ const fs = require("fs");
 const { ethers } = require("ethers");
 const readlineSync = require("readline-sync");
 
-// 🔗 List RPC
-const RPC_URLS = [
-    "https://testnet-rpc.monad.xyz",
-    "https://backup-rpc.monad.xyz"
-];
-
-// 🔥 Auto pilih RPC tercepat
-async function getFastestRPC() {
-    let fastestRPC = RPC_URLS[0];
-    let minTime = Infinity;
-
-    for (let rpc of RPC_URLS) {
-        try {
-            const start = Date.now();
-            await new ethers.JsonRpcProvider(rpc).getBlockNumber();
-            const responseTime = Date.now() - start;
-            if (responseTime < minTime) {
-                minTime = responseTime;
-                fastestRPC = rpc;
-            }
-        } catch (error) {
-            console.log(`❌ RPC gagal: ${rpc}`);
-        }
-    }
-    console.log(`✅ Menggunakan RPC tercepat: ${fastestRPC}`);
-    return new ethers.JsonRpcProvider(fastestRPC);
-}
-
-// 🔄 Inisialisasi provider sebelum bot berjalan
-let provider;
-async function initializeProvider() {
-    provider = await getFastestRPC();
-    console.log(`🔗 Provider siap: ${provider.connection.url}`);
-}
+// 🔗 Gunakan hanya satu RPC
+const RPC_URL = "https://testnet-rpc.monad.xyz";
+const provider = new ethers.JsonRpcProvider(RPC_URL);
+console.log(`✅ Menggunakan RPC: ${RPC_URL}`);
 
 // 🔑 Load Private Keys
-const PRIVATE_KEYS = process.env.PRIVATE_KEYS ? process.env.PRIVATE_KEYS.split(",") : [];
-
-if (PRIVATE_KEYS.length === 0) {
-    console.log("❌ PRIVATE_KEYS di .env kosong! Harap isi private key terlebih dahulu.");
-    process.exit(1);
-}
+const PRIVATE_KEYS = process.env.PRIVATE_KEYS.split(",");
 
 // 📜 Load ABI
 const abiData = JSON.parse(fs.readFileSync("abi.json", "utf-8"));
@@ -58,8 +23,13 @@ console.log("📜 Parameter:", params.join(", "));
 
 // 💰 Cek Saldo Wallet
 async function getBalance(wallet) {
-    const balance = await provider.getBalance(wallet);
-    return ethers.formatEther(balance);
+    try {
+        const balance = await provider.getBalance(wallet);
+        return ethers.formatEther(balance);
+    } catch (error) {
+        console.log(`❌ Gagal cek saldo ${wallet}: ${error.message}`);
+        return "0";
+    }
 }
 
 // 🔥 Mint NFT
@@ -72,7 +42,7 @@ async function mintNFT(wallet, contract, mintPrice) {
                 wallet.address, 0, 1, "0x", // recipient, tokenId, amount, data
                 { 
                     value: mintPrice > 0 ? ethers.parseEther(mintPrice.toString()) : 0, 
-                    gasPrice: ethers.parseUnits("10", "gwei") // Tingkatkan gas price agar lebih cepat
+                    gasPrice: ethers.parseUnits("5", "gwei") // Naikkan gas price agar lebih cepat
                 }
             );
 
@@ -87,8 +57,6 @@ async function mintNFT(wallet, contract, mintPrice) {
 
 // 🚀 Start Bot
 async function startBot() {
-    await initializeProvider(); // Pastikan provider sudah siap sebelum lanjut
-
     console.log("========================================");
     console.log("        🔥 BOT AUTO MINT MONAD 🔥       ");
     console.log("========================================");
